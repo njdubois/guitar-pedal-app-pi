@@ -1,0 +1,30 @@
+{
+  "explanation": "Clean blues tone with a touch of grit: Clean amp at moderate gain, a lightly driven Blues Driver for edge and touch response, and a warm plate reverb with enough pre-delay to stay clear. Modulation and both delays remain off so the reverb stays spacious rather than washy.",
+  "changes": {
+    "ampType": "clean",
+    "variation": false,
+    "gain": 32,
+    "bass": 48,
+    "middle": 55,
+    "treble": 56,
+    "presence": 45,
+    "boosterEnabled": true,
+    "modEnabled": false,
+    "fxEnabled": false,
+    "delayEnabled": false,
+    "delay2Enabled": false,
+    "reverbEnabled": true,
+    "boosterType": "blues-drive",
+    "boosterDrive": 24,
+    "boosterBottom": 0,
+    "boosterTone": 2,
+    "boosterLevel": 55,
+    "boosterDirectMix": 100,
+    "reverbType": "plate",
+    "reverbTimeMs": 1800,
+    "reverbPreDelayMs": 25,
+    "reverbDensity": 8,
+    "reverbLevel": 32,
+    "reverbDirectMix": 100
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "profile": "go2",
+  "plan": {
+    "explanation": "Clean test tone; all mapped effects explicitly off.",
+    "changes": {
+      "ampType": "clean",
+      "variation": false,
+      "gain": 25,
+      "bass": 50,
+      "middle": 55,
+      "treble": 50,
+      "presence": 45,
+      "boosterEnabled": false,
+      "modEnabled": false,
+      "fxEnabled": false,
+      "delayEnabled": false,
+      "reverbEnabled": false,
+      "delay2Enabled": false
+    }
+  }
+}

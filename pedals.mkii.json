@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "debounce_ms": 30,
+  "poll_ms": 5,
+  "amp": { "profile": "mkii", "input": null, "output": null },
+  "looper": { "host": "127.0.0.1", "port": 9951, "loop": 0 },
+  "switches": [
+    { "id": "1", "name": "Clean tone", "gpio": 17, "actions": [{ "type": "tone", "file": "tones/mkii/clean.json" }] },
+    { "id": "2", "name": "Drive tone", "gpio": 27, "actions": [{ "type": "tone", "file": "tones/mkii/drive.json" }] },
+    { "id": "3", "name": "Loop record / finish", "gpio": 22, "actions": [{ "type": "looper", "command": "record" }] }
+  ]
+}

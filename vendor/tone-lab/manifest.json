@@ -1,0 +1,29 @@
+{
+  "source_project": "/Users/nickdubois/www/PersonalProjects/tone-lab-ai",
+  "copied_date": "2026-10-23",
+  "note": "Original Tone Lab sources with local GO:2 editor extensions; original sha256 entries retain upstream provenance.",
+  "sha256": {
+    "async.js": "69ba716a6056a7d56c6fb16d2d6666fac563a2e5fe53412b8b9642e6ec9a016a",
+    "device-identity.js": "f62a2eb1f3f53d2de07e0b23dc2f23d25b452a574ec1396af2fa95201c710fba",
+    "effects.js": "fb88c47bad94ec4aaf3446978c753a46040f5dc6ed259771f47cceecdb580004",
+    "go-effects.js": "6225ae291d6961957002fa297ffe1d215aaedeb1e24fff6f09571fbcd40b741d",
+    "go-katana.js": "c1c73274c6a670bda903b5151acacc96e650eced3f70c9f1ca82dc4e8d0ea43f",
+    "go-profile.js": "d02d6a9df75dba17a2799263498cc42637dbb85d4bd07cb6d05c90d1f251ac3f",
+    "go-reader.js": "ecd606a3561ec21b86221baec0369ab26d71009c18bf0be1ec1f507874598fff",
+    "katana.js": "df3befba6566c84cb8f49447026d04944c39b844e87ba79238306b355e835e18",
+    "midi-common.js": "35f256496a495bc44435717d9f53d23ceb70001a511383f0367658a1ce71a167",
+    "mkiii-effects.js": "1bf16fcdfdddd8cb4e326fe98aa5b1a04bc6a82df84bf731e9c869712344edec",
+    "mkiii-profile.js": "49331542be1aa693e01ddfb8328a1cf1d8628dc4f8751bad47e7a7b8dc507b2f",
+    "plan.js": "223a9726b472678b1ea0220c9d136ad8afa2d4a3496b830ca66520b7045e8f1f",
+    "profile.js": "bfd48047d2633f77ffed83433368566b9cb5c913c366e73889aebeb971fafbec",
+    "sysex.js": "4bfd5d03c0a8913e516b1aa4c6fca35615b7c4200b801774cfff2267d1fa41c6"
+  },
+  "local_changes": {
+    "go-profile.js": "e93e5a499414f753704f35734d7d93b3f3938cd71eb1aea3d34139ffdec0574c",
+    "go-effects.js": "b254686da4aed2f268d062f8abad1bf30ec0e43f4dd101a7a322aebe3054e3b4",
+    "go-tone.js": "332c3c6fa5db485986914121ee3ed0f60f0b44fda0bb1b6b6cec40083ef5c8c8",
+    "go-reader.js": "c76e88b790f86371d37b06d6b7c54a76d3b8c7dd1fc49619c437e501bc6a3e83",
+    "plan.js": "4a61c5e53524b5b4a2438a4593a2bfd8955d16227175652662ae195fe9b525e5"
+  },
+  "local_documentation": "../../docs/go2-protocol-notes.md"
+}

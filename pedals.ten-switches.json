@@ -1,0 +1,127 @@
+{
+  "version": 1,
+  "debounce_ms": 30,
+  "poll_ms": 5,
+  "amp": {
+    "profile": "go2",
+    "input": null,
+    "output": null
+  },
+  "looper": {
+    "host": "127.0.0.1",
+    "port": 9951,
+    "loop": 0
+  },
+  "switches": [
+    {
+      "id": "1",
+      "name": "Clean tone",
+      "gpio": 17,
+      "actions": [
+        {
+          "type": "tone",
+          "file": "tones/go2/clean.json"
+        }
+      ]
+    },
+    {
+      "id": "2",
+      "name": "Drive tone",
+      "gpio": 27,
+      "actions": [
+        {
+          "type": "tone",
+          "file": "tones/go2/drive.json"
+        }
+      ]
+    },
+    {
+      "id": "3",
+      "name": "Loop record / finish",
+      "gpio": 22,
+      "actions": [
+        {
+          "type": "looper",
+          "command": "record"
+        }
+      ]
+    },
+    {
+      "id": "4",
+      "name": "Loop overdub",
+      "gpio": 5,
+      "actions": [
+        {
+          "type": "looper",
+          "command": "overdub"
+        }
+      ]
+    },
+    {
+      "id": "5",
+      "name": "Loop undo",
+      "gpio": 6,
+      "actions": [
+        {
+          "type": "looper",
+          "command": "undo"
+        }
+      ]
+    },
+    {
+      "id": "6",
+      "name": "Loop redo",
+      "gpio": 13,
+      "actions": [
+        {
+          "type": "looper",
+          "command": "redo"
+        }
+      ]
+    },
+    {
+      "id": "7",
+      "name": "Loop mute",
+      "gpio": 19,
+      "actions": [
+        {
+          "type": "looper",
+          "command": "mute"
+        }
+      ]
+    },
+    {
+      "id": "8",
+      "name": "Loop pause",
+      "gpio": 26,
+      "actions": [
+        {
+          "type": "looper",
+          "command": "pause"
+        }
+      ]
+    },
+    {
+      "id": "9",
+      "name": "Loop reverse",
+      "gpio": 23,
+      "actions": [
+        {
+          "type": "looper",
+          "command": "reverse"
+        }
+      ]
+    },
+    {
+      "id": "10",
+      "name": "Loop oneshot",
+      "gpio": 24,
+      "actions": [
+        {
+          "type": "looper",
+          "command": "oneshot"
+        }
+      ]
+    }
+  ]
+}

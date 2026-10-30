@@ -1,0 +1,20 @@
+{
+  "profile": "mkii",
+  "plan": {
+    "explanation": "Drive test tone; all mapped effects explicitly off.",
+    "changes": {
+      "ampType": "crunch",
+      "variation": false,
+      "gain": 55,
+      "bass": 50,
+      "middle": 55,
+      "treble": 50,
+      "presence": 45,
+      "boosterEnabled": false,
+      "modEnabled": false,
+      "fxEnabled": false,
+      "delayEnabled": false,
+      "reverbEnabled": false
+    }
+  }
+}

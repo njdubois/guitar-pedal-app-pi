@@ -1,0 +1,83 @@
+{
+  "version": 1,
+  "debounce_ms": 30,
+  "poll_ms": 5,
+  "amp": {
+    "profile": "go2",
+    "input": null,
+    "output": null
+  },
+  "looper": {
+    "host": "127.0.0.1",
+    "port": 9951,
+    "loop": 0
+  },
+  "switches": [
+    {
+      "id": "1",
+      "name": "Rec",
+      "gpio": 22,
+      "actions": [
+        {
+          "type": "looper",
+          "command": "record"
+        }
+      ]
+    },
+    {
+      "id": "2",
+      "name": "Start/Stop",
+      "gpio": 27,
+      "actions": [
+        {
+          "type": "looper",
+          "command": "play_stop"
+        }
+      ]
+    },
+    {
+      "id": "3",
+      "name": "Clear",
+      "gpio": 5,
+      "actions": [
+        {
+          "type": "looper",
+          "command": "clear"
+        }
+      ]
+    },
+    {
+      "id": "4",
+      "name": "Pedal 4",
+      "gpio": 13,
+      "actions": [
+        {
+          "type": "looper",
+          "command": "add_track"
+        }
+      ]
+    },
+    {
+      "id": "5",
+      "name": "Pedal 5",
+      "gpio": 6,
+      "actions": [
+        {
+          "type": "looper",
+          "command": "delete_track"
+        }
+      ]
+    },
+    {
+      "id": "6",
+      "name": "Pedal 6",
+      "gpio": 17,
+      "actions": [
+        {
+          "type": "looper",
+          "command": "scroll_tracks"
+        }
+      ]
+    }
+  ]
+}

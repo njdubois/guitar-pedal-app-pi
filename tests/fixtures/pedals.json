@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "amp": {"profile": "go2"},
+  "switches": [
+    {"id": "1", "gpio": 17, "actions": [{"type": "tone", "file": "tones/go2/clean.json"}]},
+    {"id": "2", "gpio": 27, "actions": [{"type": "tone", "file": "tones/go2/drive.json"}]},
+    {"id": "3", "gpio": 22, "actions": [{"type": "looper", "command": "record"}]}
+  ]
+}

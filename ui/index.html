@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Pedal controller</title>
+  <link rel="stylesheet" href="/app.css">
+  <script src="/app.js" type="module"></script>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="Pedal controller home"><span class="brand-icon" aria-hidden="true">⌁</span> Pedal controller</a>
+    <div class="top-actions">
+      <span id="run-status" class="status">Connecting…</span>
+      <label class="test-toggle"><input id="test-mode" type="checkbox"> Test mode</label>
+      <button id="start" class="button primary" disabled>Start pedals</button>
+    </div>
+  </header>
+
+  <nav id="tabs" role="tablist" aria-label="Controller pages" hidden></nav>
+  <main>
+    <section id="amp-editor" hidden>
+      <div class="editor-toolbar">
+        <button id="amp-back" class="button secondary" hidden>← Sections</button>
+        <span id="amp-location" class="amp-location">Tone editor</span>
+        <button id="read-amp" class="button secondary">Read amp</button>
+        <button id="apply-amp" class="button primary">Apply changes</button>
+        <button id="capture-tone" class="button secondary">Save to library</button>
+      </div>
+      <button id="amp-memories-open" class="text-button">Onboard memories · Bank / A B C</button>
+      <div id="amp-card-menu" class="amp-card-menu" aria-label="Amp sections"></div>
+      <section id="amp-detail" class="amp-detail" hidden>
+        <div class="amp-card-heading">
+          <button id="amp-previous" class="button secondary">← Previous</button>
+          <h2 id="amp-card-title"></h2>
+          <span id="amp-card-position" class="small muted"></span>
+          <button id="amp-next" class="button secondary">Next →</button>
+        </div>
+        <div id="amp-card-live" class="amp-card-live" aria-label="Current amp settings"></div>
+        <div id="delay-slots" class="delay-slots" aria-label="Delay slot" hidden></div>
+        <p id="editor-message" class="small muted">Edit the live tone, then apply your changes.</p>
+        <div id="amp-controls"></div>
+      </section>
+    </section>
+    <div id="demo-banner" class="banner demo" hidden><strong>Demo mode.</strong> Use the virtual pedals below to try identification. The amp is unchanged and this setup is temporary.</div>
+    <div id="connection-error" class="banner error" role="alert" hidden></div>
+    <section class="intro">
+      <div>
+        <p class="eyebrow">YOUR PEDALBOARD</p>
+        <h1>A sound for every step.</h1>
+        <p class="muted">Choose your pedal count, click each pedal twice to identify it, then pick its action.</p>
+      </div>
+      <button id="open-library" class="button secondary">Tone library <span id="library-count" class="count">0</span></button>
+    </section>
+
+    <section class="setup-bar" aria-label="Pedalboard setup">
+      <label>Number of pedals
+        <select id="pedal-count" aria-label="Number of pedals"></select>
+      </label>
+      <label>Amplifier
+        <select id="amp-profile">
+          <option value="go2">BOSS KATANA:GO:2</option>
+          <option value="mkii">BOSS Katana MkII</option>
+        </select>
+      </label>
+      <div class="save-area"><span id="save-status">Setup saved</span><button id="save" class="button secondary" disabled>Save setup</button></div>
+    </section>
+
+    <section id="learning-panel" class="learning" aria-live="polite" hidden>
+      <div><span class="pulse-dot" aria-hidden="true"></span><strong id="learning-title">Click your pedal twice</strong><p id="learning-detail"></p></div>
+      <button id="cancel-learning" class="button secondary">Cancel</button>
+    </section>
+    <div id="input-error" class="banner error" hidden><span id="input-error-text"></span><button id="retry-inputs" class="button secondary">Retry inputs</button></div>
+    <div id="demo-controls" class="demo-controls" hidden><span>Virtual pedals</span><div id="demo-buttons"></div></div>
+
+    <section id="pedals" class="pedal-grid" aria-label="Your pedals"></section>
+
+    <section class="connection-panel" aria-label="Amp connection">
+      <div class="connection-heading"><div><h2>Amp connection</h2><p id="amp-status" class="muted">Connection not checked.</p></div><button id="check-amp" class="button secondary">Check amp</button></div>
+      <details>
+        <summary>MIDI connection settings</summary>
+        <div class="midi-controls">
+          <label>MIDI input<select id="midi-input"><option value="">Automatic</option></select></label>
+          <label>MIDI output<select id="midi-output"><option value="">Automatic</option></select></label>
+          <button id="refresh-ports" class="button secondary">Find MIDI ports</button>
+        </div>
+      </details>
+    </section>
+
+    <section class="connection-panel looper-panel" aria-label="Live looper">
+      <div class="looper-toolbar"><h2>Tracks <span id="loop-mode" class="status">Empty</span></h2><button id="looper-audio" class="button secondary">Start looper</button><button id="looper-add" class="button secondary">Add track</button><button id="looper-new-record" class="button primary">Record new track</button><button id="looper-play-all" class="button secondary">Play all</button><button id="looper-stop-all" class="button secondary">Stop all</button></div>
+      <p id="looper-status" class="muted" role="status"></p>
+      <div class="looper-selected-bar"><button id="looper-prev" class="button secondary" aria-label="Previous track">←</button><strong id="looper-selected">Track 1</strong><button id="looper-next" class="button secondary" aria-label="Next track">→</button><button id="looper-record" class="button secondary">Record / replace</button><button id="looper-play" class="button secondary">Play / stop</button><button id="looper-mute" class="button secondary">Mute</button><button id="looper-quieter" class="button secondary" aria-label="Track volume down">Vol −</button><button id="looper-louder" class="button secondary" aria-label="Track volume up">Vol +</button></div>
+      <div class="track-management"><span class="small muted">Selected track</span><button id="looper-rename" class="text-button">Rename</button><button id="looper-copy" class="text-button">Duplicate</button><button id="looper-clear" class="text-button">Clear audio</button><button id="looper-delete" class="text-button error-text">Delete track</button></div>
+      <div id="loop-tracks" class="loop-tracks" aria-label="Loop tracks"></div>
+      <p id="loop-timing" class="small muted"></p>
+    </section>
+
+    <section class="activity-panel" aria-label="Recent activity">
+      <div class="activity-heading"><h2>Recent activity</h2><span id="activity-status" class="muted">Waiting for a pedal…</span></div>
+      <ol id="activity" aria-live="polite"></ol>
+    </section>
+    <footer>Saved on this Raspberry Pi. Clicks in either switch position trigger an action.<button id="download-setup" class="text-button">Download setup JSON</button></footer>
+  </main>
+
+  <section id="library-dialog" hidden>
+    <div class="dialog-header"><div><p class="eyebrow">YOUR SOUNDS</p><h2>Tone library</h2></div></div>
+    <p class="muted">Import a Tone Lab “Save plan” JSON or a tone captured by this controller. Files stay on the Pi.</p>
+    <div class="library-toolbar"><button id="choose-files" class="button primary">Import JSON files</button><button id="paste-tone" class="button secondary">Paste JSON</button><button id="refresh-library" class="text-button">Refresh files</button></div>
+    <input id="tone-files" type="file" accept=".json,application/json" multiple hidden>
+    <p id="library-message" class="inline-message" role="status"></p>
+    <div id="library-list" class="library-list"></div>
+    
+  </section>
+
+  <dialog id="json-dialog">
+    <div class="dialog-header"><h2 id="json-heading">Paste a tone</h2><button class="icon-button close-dialog" aria-label="Close JSON editor">×</button></div>
+    <label>Tone name<input id="tone-name" type="text" maxlength="100" placeholder="e.g. Warm clean"></label>
+    <label>JSON object<textarea id="tone-json" spellcheck="false" rows="14" placeholder='Paste the complete JSON object here'></textarea></label>
+    <p id="json-error" class="inline-message error-text" role="alert"></p>
+    <div class="dialog-actions"><button id="cancel-json" class="button secondary">Cancel</button><button id="save-tone" class="button primary">Validate &amp; save tone</button></div>
+  </dialog>
+
+  <div id="toast" class="toast" role="status" hidden></div>
+</body>
+</html>
