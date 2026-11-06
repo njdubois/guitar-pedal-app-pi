@@ -106,7 +106,7 @@ def validate_config(document, filename):
             or not 1 <= looper["port"] <= 65535
             or type(looper.get("loop")) is not int or looper["loop"] < 0):
         raise ValueError("looper needs host, port 1..65535, and a nonnegative loop index")
-    if looper.get("engine", "builtin" if amp["profile"] == "go2" else "osc") not in ("builtin", "osc"):
+    if looper.get("engine", "builtin") not in ("builtin", "osc"):
         raise ValueError("looper.engine must be builtin or osc")
     switches = config.get("switches")
     if not isinstance(switches, list) or not switches:
@@ -147,7 +147,7 @@ def validate_config(document, filename):
                         raise ValueError("Unsupported looper command")
                     if action["command"] == "rename_track" and (not isinstance(action.get("name"), str) or not 1 <= len(action["name"].strip()) <= 60):
                         raise ValueError("Rename track needs a name of 1–60 characters")
-                    if (looper.get("engine", "builtin" if amp["profile"] == "go2" else "osc") == "osc"
+                    if (looper.get("engine", "builtin") == "osc"
                             and action["command"] not in OSC_LOOP_COMMANDS):
                         raise ValueError("Track management, Start / stop and Clear require the built-in looper")
                 elif kind == "event":
@@ -283,7 +283,7 @@ class ToneWorker:
 
 
 def uses_builtin_looper(config):
-    return config["looper"].get("engine", "builtin" if config["amp"]["profile"] == "go2" else "osc") == "builtin"
+    return config["looper"].get("engine", "builtin") == "builtin"
 
 
 def has_looper(config):
@@ -303,9 +303,9 @@ def dispatch(switch, config, worker, dry_run, position=None, audio_looper=None):
         elif action["type"] == "looper":
             if uses_builtin_looper(config):
                 if dry_run:
-                    LOG.info("DRY RUN: GO:2 looper %s", action["command"])
+                    LOG.info("DRY RUN: Built-in looper %s", action["command"])
                 elif audio_looper is None:
-                    raise ValueError("GO:2 looper is not running")
+                    raise ValueError("Built-in looper is not running")
                 else:
                     if action["command"] == "rename_track":
                         audio_looper.hit(action["command"], name=action["name"])
@@ -374,7 +374,7 @@ def main():
     worker = ToneWorker(config, args.dry_run, args.node)
     try:
         if not args.dry_run and uses_builtin_looper(config) and has_looper(config):
-            audio_looper.start()
+            audio_looper.start(config["amp"]["profile"])
         if args.stomp:
             dispatch(switches[args.stomp], config, worker, args.dry_run, audio_looper=audio_looper)
             worker.drain()

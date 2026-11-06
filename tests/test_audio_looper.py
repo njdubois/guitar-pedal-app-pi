@@ -198,10 +198,131 @@ class TimingTests(unittest.TestCase):
         engine.commands.append(('record', time.monotonic()))
         engine.process(pcm(100, 200, 300, 400))
         engine.commands.append(('record', time.monotonic()))
-        self.assertEqual(engine.process(pcm(0, 0, 0, 0)), pcm(100, 200, 300, 400))
+        engine.process(pcm(0, 0, 0, 0))
+        self.assertEqual(engine.buffer.mode, 'playing')
+        self.assertEqual(engine.buffer.samples.tolist(), [100, 200, 300, 400])
         engine.commands.append(('play_stop', time.monotonic()))
-        self.assertEqual(engine.process(pcm(0, 0)), pcm(0, 0))
+        engine.process(pcm(0, 0))
+        self.assertEqual(engine.buffer.mode, 'paused')
         engine.commands.append(('clear', time.monotonic()))
         engine.process(pcm(0, 0))
         self.assertEqual(engine.buffer.mode, 'empty')
         self.assertNotIn('bpm', engine.state())
+
+
+class USBProfileTests(unittest.TestCase):
+    cards = """ 1 [KATANAGO       ]: USB-Audio - KATANA:GO
+                      BOSS KATANA:GO at usb-1
+ 2 [KATANA         ]: USB-Audio - KATANA
+                      BOSS KATANA at usb-2
+"""
+
+    def test_selects_only_the_requested_amp_and_adapts_mkii_pcm(self):
+        from unittest.mock import patch, call
+        from audio_looper import AudioLooper
+        for profile, device in [('go2', 'hw:CARD=KATANAGO,DEV=0'),
+                                ('mkii', 'plughw:CARD=KATANA,DEV=0')]:
+            engine = AudioLooper()
+            with patch('audio_looper.Path.read_text', return_value=self.cards), \
+                 patch('alsa_audio.PCM') as pcm_class, patch('audio_looper.threading.Thread'):
+                pcm_class.return_value.period_frames = 240
+                engine.start(profile)
+                options = {'channels': 4} if profile == 'mkii' else {}
+                self.assertEqual(pcm_class.call_args_list, [call(device, capture=True, **options), call(device, **options)])
+                self.assertTrue(engine.active)
+                engine.thread.is_alive.return_value = False
+                engine.close()
+
+    def test_does_not_use_go_audio_for_mkii(self):
+        from unittest.mock import patch
+        from audio_looper import AudioLooper
+        with patch('audio_looper.Path.read_text', return_value=self.cards.split(' 2 [')[0]):
+            with self.assertRaisesRegex(ValueError, 'Connect the Katana MkII'):
+                AudioLooper().start('mkii')
+
+    def test_mkii_defaults_to_builtin_and_explicit_osc_remains_available(self):
+        from pedal_controller import uses_builtin_looper
+        from pathlib import Path
+        import json
+        config = validate_config(json.loads(Path('pedals.mkii.json').read_text()), Path('pedals.mkii.json'))
+        self.assertTrue(uses_builtin_looper(config))
+        config['looper']['engine'] = 'osc'
+        self.assertFalse(uses_builtin_looper(config))
+
+
+class MkIIChannelTests(unittest.TestCase):
+    def test_capture_uses_primary_pair_and_playback_keeps_reamp_silent(self):
+        import ctypes as C
+        import threading
+        from alsa_audio import PCM
+        stream = PCM.__new__(PCM)
+        stream.channels = 4
+        stream.handle = C.c_void_p(1)
+        stream.lib = Mock()
+        stream.lib.snd_pcm_state.return_value = 3
+        def read(handle, memory, frames):
+            C.memmove(memory, pcm(100, 200, 300, 400, -100, -200, -300, -400), 16)
+            return 2
+        stream.lib.snd_pcm_readi.side_effect = read
+        stop = threading.Event()
+        self.assertEqual(stream.transfer(None, 2, stop, capture=True), pcm(100, 200, -100, -200))
+        written = []
+        def write(handle, memory, frames):
+            written.append(C.string_at(memory, 8))
+            return 1
+        stream.lib.snd_pcm_writei.side_effect = write
+        stream.transfer(pcm(100, 200, -100, -200), 2, stop)
+        self.assertEqual(b''.join(written), pcm(100, 200, 0, 0, -100, -200, 0, 0))
+
+
+class ClickSuppressionTests(unittest.TestCase):
+    def test_loop_seam_is_smooth_without_editing_recorded_audio(self):
+        from audio_looper import TrackLooper, FADE_FRAMES
+        import numpy as np
+        looper = TrackLooper(smooth=True)
+        source = np.full((FADE_FRAMES * 8, 2), 20000, dtype='<i2')
+        source[len(source)//2:] = -20000
+        looper.command('record')
+        looper.process(source.tobytes())
+        looper.command('record')
+        output = np.frombuffer(looper.process(bytes(source.nbytes * 2)), dtype='<i2').reshape(-1, 2)
+        seam = len(source)
+        self.assertEqual(output[seam - 1].tolist(), [0, 0])
+        self.assertEqual(output[seam].tolist(), [0, 0])
+        self.assertLess(abs(int(output[seam + 1, 0])), 100)
+        self.assertEqual(looper.selected.buffer.samples.tobytes(), source.tobytes())
+
+    def test_stop_fades_across_blocks_and_start_preserves_stereo(self):
+        from audio_looper import AudioLooper, FADE_FRAMES
+        import numpy as np
+        import time
+        engine = AudioLooper()
+        engine.looper.smooth = False  # Isolate the transport fade.
+        engine.buffer.samples = array('h', [20000, -10000] * 2000)
+        engine.buffer.mode = 'playing'
+        engine.process(bytes(400 * 4))
+        engine.commands.append(('play_stop', time.monotonic()))
+        output = b''.join(engine.process(bytes(80 * 4)) for _ in range(4))
+        samples = np.frombuffer(output, dtype='<i2').reshape(-1, 2)
+        self.assertEqual(samples[0].tolist(), [20000, -10000])
+        self.assertTrue(np.all(np.diff(samples[:, 0].astype(int)) <= 0))
+        self.assertTrue(np.all(samples[FADE_FRAMES:] == 0))
+        engine.commands.append(('play_stop', time.monotonic()))
+        samples = np.frombuffer(engine.process(bytes(400 * 4)), dtype='<i2').reshape(-1, 2)
+        self.assertEqual(samples[0].tolist(), [0, 0])
+        self.assertEqual(samples[-1].tolist(), [20000, -10000])
+
+
+class SeamFastPathTests(unittest.TestCase):
+    def test_interior_blocks_preserve_pcm_in_both_directions(self):
+        from audio_looper import TrackLooper, FADE_FRAMES
+        source = array('h', [(i * 71) % 60001 - 30000 for i in range(FADE_FRAMES * 20)])
+        for reverse in (False, True):
+            engines = [TrackLooper(smooth=value) for value in (False, True)]
+            for loop in engines:
+                loop.selected.buffer.samples = source[:]
+                loop.selected.buffer.mode = 'playing'
+                loop.selected.buffer.reverse = reverse
+                loop.clock = FADE_FRAMES * 6
+            silence = bytes(240 * 4)
+            self.assertEqual(engines[0].process(silence), engines[1].process(silence))

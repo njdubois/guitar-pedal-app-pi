@@ -23,6 +23,23 @@ class AmpEditorTests(unittest.TestCase):
         self.app.close()
         self.directory.cleanup()
 
+    def test_mkii_connect_edit_capture_and_reload(self):
+        self.app.amp["memory"] = {"bank": 1, "channel": "A"}
+        self.app._check_amp({"profile": "mkii", "input": None, "output": None}, False)
+        self.assertEqual(self.app.amp["profile"], "mkii")
+        self.assertNotIn("memory", self.app.amp)
+        self.app.edit_amp({"changes": {"gain": 63, "ampType": "crunch", "delayTimeMs": 650}})
+        saved = self.app.capture_amp({"name": "MkII crunch"})
+        document = self.app.tone_file(saved["file"])
+        self.assertEqual(document["profile"], "mkii")
+        self.assertEqual(document["settings"]["gain"], 63)
+        self.app.edit_amp({"changes": {"gain": 10}})
+        self.app.edit_amp({"file": saved["file"]})
+        self.assertEqual(self.app.amp_settings["gain"], 63)
+        self.assertEqual(self.app.amp_settings["delayTimeMs"], 650)
+        with self.assertRaises(UIError):
+            self.app.memory_action({"bank": 1, "channel": "A", "command": "recall-memory"})
+
     def test_channel_targets_and_running_pedals_are_guarded(self):
         for body in ({"bank":0,"channel":"A","command":"write-memory"},
                      {"bank":1,"channel":"D","command":"recall-memory"}):

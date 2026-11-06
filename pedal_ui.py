@@ -304,7 +304,7 @@ class PedalApp:
             self.pause()
             validate_tones(self.config, self.node)
             if not (dry_run or self.demo) and has_looper(self.config) and uses_builtin_looper(self.config):
-                self.audio_looper.start()
+                self.audio_looper.start(self.config["amp"]["profile"])
             with self.lock:
                 self.learning = None
                 self.dry_run = bool(dry_run) or self.demo
@@ -315,14 +315,14 @@ class PedalApp:
     def looper_action(self, body):
         from audio_looper import LOOP_COMMANDS
         with self.operations:
-            if self.config["amp"]["profile"] != "go2" or not uses_builtin_looper(self.config):
-                raise UIError("Track controls require the GO:2 built-in looper.")
+            if not uses_builtin_looper(self.config):
+                raise UIError("Track controls require the built-in looper.")
             command = body.get("command")
             if command == "start_audio":
                 if self.demo:
                     self.audio_looper.start_demo()
                 else:
-                    self.audio_looper.start()
+                    self.audio_looper.start(self.config["amp"]["profile"])
             elif command == "stop_audio":
                 self.audio_looper.close()
             else:
@@ -587,7 +587,8 @@ class PedalApp:
         try:
             if self.demo:
                 time.sleep(.2)
-                result = {"inputs": [{"name": "Demo GO:2 MIDI"}], "outputs": [{"name": "Demo GO:2 MIDI"}]}
+                name = "Demo Katana MkII MIDI" if options["profile"] == "mkii" else "Demo GO:2 MIDI"
+                result = {"inputs": [{"name": name}], "outputs": [{"name": name}]}
             else:
                 args = [self.node, str(ROOT / "katana_tones.mjs"), "ports" if ports_only else "read",
                         "--profile", options["profile"]]
@@ -613,6 +614,7 @@ class PedalApp:
                 if ports_only:
                     self.amp.update(ports=result, status="unchecked", message="MIDI ports refreshed. Click Check amp to read the amp.")
                 else:
+                    self.amp.pop("memory", None)
                     if result.get("memory"):
                         self.amp["memory"] = result["memory"]
                     self.amp_settings = result.get("settings", {})
@@ -685,6 +687,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(200, self.app.tone_file(filename))
             static = {"/": ("index.html", "text/html; charset=utf-8"),
                       "/app.js": ("app.js", "text/javascript; charset=utf-8"),
+                      "/amp-setup.js": ("amp-setup.js", "text/javascript; charset=utf-8"),
                       "/app.css": ("app.css", "text/css; charset=utf-8")}
             if parsed.path in static:
                 filename, content_type = static[parsed.path]

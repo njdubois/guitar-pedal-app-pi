@@ -27,8 +27,9 @@ class MultiTrackTests(unittest.TestCase):
         loop.command('record_new_track')
         self.assertEqual(loop.process(pcm(100, 101, 200, 201)), pcm(20, 21, 30, 31))
         loop.command('finish_recording')
+        self.assertIsNotNone(loop.selected.finish_at)
+        self.assertEqual(loop.process(pcm(300, 301, 400, 401)), pcm(40, 41, 10, 11))
         self.assertEqual(len(loop.selected.buffer.samples), len(first.buffer.samples))
-        self.assertEqual(loop.process(pcm(0, 0, 0, 0)), pcm(40, 41, 10, 11))
         self.assertEqual(loop.process(pcm(0, 0, 0, 0)), pcm(120, 122, 230, 232))
         self.assertEqual(first.buffer.samples.tobytes(), source)
         self.assertIsNot(first.buffer.samples, loop.selected.buffer.samples)
@@ -39,8 +40,9 @@ class MultiTrackTests(unittest.TestCase):
         loop.command('record_new_track')
         loop.process(pcm(10, 20, 30, 40, 50, 60))
         loop.command('record')
-        self.assertEqual(loop.selected.buffer.samples.tolist(), [10, 20, 30, 40, 50, 60, 0, 0])
-        self.assertEqual(loop.process(pcm(0, 0)), pcm(3, 4))  # padded fourth frame
+        self.assertEqual(loop.selected.buffer.mode, 'recording')
+        self.assertEqual(loop.process(pcm(70, 80)), pcm(3, 4))
+        self.assertEqual(loop.selected.buffer.samples.tolist(), [10, 20, 30, 40, 50, 60, 70, 80])
         self.assertEqual(loop.process(pcm(0, 0)), pcm(11, 22))
 
     def test_navigation_wraps_and_crud_affects_selected_track_only(self):
@@ -189,6 +191,8 @@ class MultiTrackTests(unittest.TestCase):
             shutil.copyfile(ROOT / 'pedals.json', root / 'pedals.json')
             app = PedalApp(root / 'pedals.json', demo=True)
             try:
+                app.config['amp']['profile'] = 'mkii'
+                app.config['looper']['engine'] = 'builtin'
                 result = app.looper_action({'command': 'add_track'})
                 self.assertEqual(len(result['looper']['tracks']), 2)
                 result = app.looper_action({'command': 'rename_track', 'track_id': 1, 'name': 'Verse'})
@@ -205,3 +209,54 @@ class MultiTrackTests(unittest.TestCase):
         record(loop, pcm(5, 6))
         self.assertEqual(loop.cycle, 2)
         self.assertEqual(loop.selected.buffer.samples.tolist(), [5, 6])
+
+
+class RecordingBoundaryTests(unittest.TestCase):
+    def base(self):
+        loop = TrackLooper()
+        record(loop, pcm(*([1, 2] * 8)))
+        loop.process(pcm(0, 0, 0, 0, 0, 0))  # start at a different phase
+        loop.command('record_new_track')
+        return loop
+
+    def test_early_finish_captures_to_boundary_then_plays_remainder_of_block(self):
+        loop = self.base()
+        loop.process(pcm(*([100, 200] * 6)))
+        loop.command('finish_recording')
+        self.assertEqual(loop.selected.buffer.mode, 'recording')
+        output = loop.process(pcm(*([300, 400] * 4)))
+        self.assertEqual(output, pcm(1, 2, 1, 2, 101, 202, 101, 202))
+        self.assertEqual(loop.selected.buffer.samples.tolist(), [100, 200] * 6 + [300, 400] * 2)
+        self.assertEqual(loop.selected.buffer.mode, 'playing')
+        self.assertIsNone(loop.selected.finish_at)
+        self.assertEqual(loop.process(pcm(*([0, 0] * 8))),
+                         pcm(*([101, 202] * 4 + [301, 402] * 2 + [101, 202] * 2)))
+
+    def test_late_finish_trims_overrun_instead_of_adding_a_silent_cycle(self):
+        loop = self.base()
+        loop.process(pcm(*([100, 200] * 9)))
+        loop.command('record')
+        self.assertEqual(loop.selected.buffer.samples.tolist(), [100, 200] * 8)
+        self.assertEqual(loop.process(pcm(*([0, 0] * 24))), pcm(*([101, 202] * 24)))
+
+    def test_new_track_handoff_waits_for_audio_boundary(self):
+        loop = self.base()
+        previous = loop.selected
+        loop.process(pcm(*([100, 200] * 6)))
+        loop.command('record_new_track')
+        self.assertEqual(len(loop.tracks), 2)
+        loop.process(pcm(*([300, 400] * 4)))
+        self.assertEqual(len(loop.tracks), 3)
+        self.assertEqual(previous.buffer.samples.tolist(), [100, 200] * 6 + [300, 400] * 2)
+        self.assertEqual(previous.buffer.mode, 'playing')
+        self.assertEqual(loop.selected.buffer.samples.tolist(), [300, 400] * 2)
+        self.assertEqual(loop.selected.buffer.mode, 'recording')
+
+    def test_stop_all_cancels_pending_handoff(self):
+        loop = self.base()
+        loop.process(pcm(100, 200))
+        loop.command('record_new_track')
+        loop.command('stop_all')
+        loop.process(pcm(*([0, 0] * 16)))
+        self.assertEqual(len(loop.tracks), 2)
+        self.assertTrue(all(track.buffer.mode == 'paused' for track in loop.tracks))

@@ -10,6 +10,7 @@ import numpy as np
 
 RATE = 48000
 FRAMES = 240
+FADE_FRAMES = RATE // 200  # 5 ms; audio fades do not delay pedal commands.
 MAX_TRACKS = 16
 MAX_SAMPLES = RATE * 2 * 300  # Five minutes of stereo across all tracks.
 OSC_LOOP_COMMANDS = {"record", "overdub", "undo", "redo", "mute", "pause", "reverse", "oneshot", "trigger"}
@@ -140,18 +141,21 @@ class LoopTrack:
         self.volume = 100
         self.origin = 0
         self.capacity = MAX_SAMPLES
+        self.finish_at = None
         self.meter = InputMeter()
 
 
 class TrackLooper:
     """Sample-clock-aligned independent tracks; only the audio thread mutates PCM."""
-    def __init__(self):
+    def __init__(self, smooth=False):
+        self.smooth = smooth
         self.tracks = []
         self.selected_id = None
         self.next_id = 1
         self.clock = 0
         self.cycle = 0
         self.output_clipping = False
+        self.record_next = False
         self.add()
 
     @property
@@ -185,10 +189,28 @@ class TrackLooper:
             self.cycle = len(buf.samples)
         length = ((len(buf.samples) + self.cycle - 1) // self.cycle) * self.cycle
         buf.samples.extend(array('h', [0]) * (length - len(buf.samples)))
+        track.finish_at = None
         buf.mode = 'playing'
         buf.position = (self.clock - track.origin) % len(buf.samples)
 
+    def request_finish(self, track):
+        buf = track.buffer
+        if buf.mode != 'recording' or not self.cycle or not buf.samples:
+            self.finish(track)
+            return
+        if track.finish_at is not None:
+            return
+        # Snap to the nearest complete cycle, keeping at least one cycle.
+        cycles = max(1, (len(buf.samples) + self.cycle // 2) // self.cycle)
+        target = min(cycles * self.cycle, track.capacity)
+        if target > len(buf.samples):
+            track.finish_at = target
+        else:
+            del buf.samples[target:]
+            self.finish(track)
+
     def finish_recordings(self):
+        self.record_next = False
         for track in self.tracks:
             self.finish(track)
             if track.buffer.mode == 'overdubbing':
@@ -202,6 +224,17 @@ class TrackLooper:
                 raise ValueError('That track no longer exists.')
             self.selected_id = track_id
         track = self.selected
+        if command in ('stop_all', 'clear_all', 'clear', 'delete_track', 'add_track', 'duplicate_track', 'pause', 'play_stop'):
+            self.record_next = False
+        if command == 'record_new_track':
+            if len(self.tracks) >= MAX_TRACKS:
+                raise ValueError(f"A session supports up to {MAX_TRACKS} tracks.")
+            for item in self.tracks:
+                if item.buffer.mode == 'recording':
+                    self.request_finish(item)
+            if any(item.finish_at is not None for item in self.tracks):
+                self.record_next = True
+                return
         if command == 'select_track':
             if track_id is None:
                 raise ValueError('Choose a track.')
@@ -216,7 +249,10 @@ class TrackLooper:
             if command == 'record_new_track':
                 self.command('record')
         elif command == 'finish_recording':
-            self.finish_recordings()
+            for item in self.tracks:
+                self.request_finish(item)
+                if item.buffer.mode == 'overdubbing':
+                    item.buffer.mode = 'playing'
         elif command == 'rename_track':
             if not isinstance(name, str) or not 1 <= len(name.strip()) <= 60:
                 raise ValueError('Track names must contain 1–60 characters.')
@@ -258,13 +294,14 @@ class TrackLooper:
                     item.buffer.once = False
         elif command == 'clear_all':
             for item in self.tracks:
+                item.finish_at = None
                 item.buffer = LoopBuffer()
                 item.meter = InputMeter()
                 item.origin = 0
             self.reset_clock_if_empty()
         elif command == 'record':
             if track.buffer.mode == 'recording':
-                self.finish(track)
+                self.request_finish(track)
             else:
                 self.finish_recordings()
                 if not any(item is not track and item.buffer.samples for item in self.tracks):
@@ -274,10 +311,12 @@ class TrackLooper:
                     capacity = capacity // self.cycle * self.cycle
                 if capacity < 2:
                     raise ValueError('Track audio is full. Clear or delete a track first.')
+                track.finish_at = None
                 track.buffer.command('record')
                 track.meter = InputMeter()
                 track.origin, track.capacity = self.clock, capacity
         elif command == 'clear':
+            track.finish_at = None
             track.buffer.command('clear')
             track.meter = InputMeter()
             track.origin = self.clock
@@ -295,6 +334,14 @@ class TrackLooper:
                 track.origin = self.clock - phase
 
     def process(self, data):
+        # Split at a pending take boundary, even when it falls inside an ALSA
+        # block. The remainder plays immediately; no silent block is inserted.
+        pending = [item.finish_at - len(item.buffer.samples) for item in self.tracks
+                   if item.buffer.mode == 'recording' and item.finish_at is not None]
+        if pending:
+            boundary = min(pending) * 2
+            if 0 < boundary < len(data):
+                return self.process(data[:boundary]) + self.process(data[boundary:])
         outputs = []
         advancing = any(track.buffer.mode in ('playing', 'recording', 'overdubbing') for track in self.tracks)
         for track in self.tracks:
@@ -308,18 +355,41 @@ class TrackLooper:
                 captured = data[:max(0, remaining) * 2]
                 buf.process(captured)
                 track.meter.observe(captured)
-                if len(buf.samples) >= track.capacity or buf.mode != 'recording':
+                if (len(buf.samples) >= track.capacity or buf.mode != 'recording'
+                        or track.finish_at is not None and len(buf.samples) >= track.finish_at):
                     # LoopBuffer's own cap may finish recording at the boundary.
                     buf.mode = 'recording'
                     self.finish(track)
                 continue
+            start_position = buf.position
             output = buf.process(data)
+            if self.smooth and mode in ('playing', 'overdubbing') and buf.samples:
+                # Fade both sides of the seam without shortening the loop,
+                # changing stored PCM, or moving other tracks out of phase.
+                count = len(output) // 4
+                length = len(buf.samples) // 2
+                direction = -1 if buf.reverse else 1
+                start = start_position // 2
+                end = start + direction * (count - 1)
+                width = min(FADE_FRAMES, max(1, length // 2))
+                # Nearly every block is away from the seam. Keep its PCM
+                # unchanged instead of constructing floating point envelopes.
+                if min(start, end) < width or max(start, end) >= length - width:
+                    positions = (start + direction * np.arange(count)) % length
+                    gain = np.minimum(positions, length - 1 - positions) / width
+                    gain = np.clip(gain, 0, 1)
+                    samples = np.frombuffer(output, dtype='<i2').reshape(-1, 2)
+                    output = (samples * gain[:, None]).astype('<i2').tobytes()
             if mode == 'overdubbing':
                 track.meter.observe(data)
             if mode in ('playing', 'overdubbing') and not buf.muted and track.volume:
                 outputs.append((output, track.volume))
         if advancing:
             self.clock += len(data) // 2
+        if self.record_next and not any(item.finish_at is not None for item in self.tracks):
+            self.record_next = False
+            if len(self.tracks) < MAX_TRACKS:
+                self.command('record_new_track')
         self.output_clipping = False
         if not outputs:
             return bytes(len(data))
@@ -340,6 +410,7 @@ class TrackLooper:
         return mixed.astype('<i2').tobytes()
 
     def pause_all(self):
+        self.record_next = False
         self.finish_recordings()
         for track in self.tracks:
             if track.buffer.mode in ('playing', 'overdubbing'):
@@ -347,6 +418,7 @@ class TrackLooper:
 
     def state(self):
         return [{'id': track.id, 'name': track.name, 'selected': track.id == self.selected_id,
+                 'finishing': track.finish_at is not None,
                  'mode': track.buffer.mode, 'seconds': round(len(track.buffer.samples) / (RATE * 2), 3),
                  'position': track.buffer.position / max(2, len(track.buffer.samples)),
                  'muted': track.buffer.muted, 'reverse': track.buffer.reverse, 'volume': track.volume,
@@ -355,7 +427,10 @@ class TrackLooper:
 
 class AudioLooper:
     def __init__(self):
-        self.looper = TrackLooper()
+        self.looper = TrackLooper(smooth=True)
+        self.last_output = np.zeros(2, dtype=np.float64)
+        self.transition = np.zeros(2, dtype=np.float64)
+        self.fade_remaining = 0
         self.meter = InputMeter()
         self.notice = ''
         self.frames = FRAMES
@@ -401,40 +476,55 @@ class AudioLooper:
                 self.looper.command(command, **options)
                 self.notice = ''
 
-    def start(self):
+    def start(self, profile="go2"):
         if self.thread and self.thread.is_alive():
             return
         from alsa_audio import PCM
         import re
-        cards = Path('/proc/asound/cards').read_text()
+        if profile not in ('go2', 'mkii'):
+            raise ValueError('Unsupported amp profile for USB audio.')
+        label = 'GO:2' if profile == 'go2' else 'Katana MkII'
+        try:
+            cards = Path('/proc/asound/cards').read_text()
+        except OSError as error:
+            raise ValueError(f'Cannot discover {label} USB audio: {error}') from error
         matches = re.findall(r'^\s*\d+\s+\[([^]]+)\].*\n\s*(.*)', cards, re.M)
-        card = next((name.strip() for name, description in matches
-                     if 'KATANA:GO' in description or 'KATANAGO' in name), None)
+        def matches_profile(name, description):
+            identity = re.sub(r'[^A-Z0-9]', '', name.upper() + description.upper())
+            return ('KATANAGO' in identity) if profile == 'go2' else (
+                'KATANA' in identity and 'KATANAGO' not in identity)
+        candidates = [name.strip() for name, description in matches if matches_profile(name, description)]
+        if len(candidates) > 1:
+            raise ValueError(f'Connect only one {label} USB audio interface before starting the looper.')
+        card = candidates[0] if candidates else None
         if not card:
-            raise ValueError('Connect the GO:2 USB audio interface before starting the looper.')
-        self.device = f'hw:CARD={card},DEV=0'
+            raise ValueError(f'Connect the {label} USB audio interface before starting the looper.')
+        # ALSA plug adapts the MkII hardware format/rate to our stereo PCM.
+        interface = 'hw' if profile == 'go2' else 'plughw'
+        self.device = f'{interface}:CARD={card},DEV=0'
         self.error = ''
         self.stop.clear()
         try:
-            self.capture = PCM(self.device, capture=True)
-            self.playback = PCM(self.device)
+            options = {'channels': 4} if profile == 'mkii' else {}
+            self.capture = PCM(self.device, capture=True, **options)
+            self.playback = PCM(self.device, **options)
             # Match the hardware period instead of crossing period boundaries
             # with arbitrary 128-frame reads/writes.
             from math import gcd
             self.frames = gcd(self.capture.period_frames, self.playback.period_frames)
             self.active = True
-            self.thread = threading.Thread(target=self.run, name='go2-looper', daemon=True)
+            self.thread = threading.Thread(target=self.run, name='usb-looper', daemon=True)
             self.thread.start()
         except Exception as error:
             self.close()
-            self.error = f'GO:2 audio could not start: {error}'
+            self.error = f'{label} audio could not start: {error}'
             raise ValueError(self.error) from error
 
     def hit(self, command, **options):
         if self.error:
             raise ValueError(self.error)
         if not self.active:
-            raise ValueError('GO:2 looper is not running. Start pedals again.')
+            raise ValueError('Built-in looper is not running. Start pedals again.')
         # deque append/pop are atomic: a stomp never waits for DSP or undo copies.
         if not isinstance(command, str) or command not in LOOP_COMMANDS:
             raise ValueError('Unsupported looper command.')
@@ -444,6 +534,7 @@ class AudioLooper:
 
     def process(self, data):
         """Apply pedal commands immediately at the next audio block."""
+        changed = False
         while self.commands:
             item = self.commands.popleft()
             command, requested = item[:2]
@@ -451,11 +542,28 @@ class AudioLooper:
             self.last_command_ms = round((time.monotonic() - requested) * 1000, 2)
             try:
                 self.looper.command(command, **options)
+                changed = command not in ('select_track', 'next_track', 'previous_track', 'scroll_tracks', 'rename_track', 'add_track') or changed
                 self.notice = ''
             except ValueError as error:
                 self.notice = str(error)
         output = self.looper.process(data)
         self.meter.observe(data)
+        if output:
+            if not changed and not self.fade_remaining:
+                self.last_output = np.frombuffer(output, dtype='<i2')[-2:].astype(np.float64)
+                return output
+            samples = np.frombuffer(output, dtype='<i2').reshape(-1, 2).astype(np.float64)
+            if changed:
+                self.transition = self.last_output - samples[0]
+                self.fade_remaining = FADE_FRAMES
+            count = min(len(samples), self.fade_remaining)
+            if count:
+                weights = np.arange(self.fade_remaining, self.fade_remaining - count, -1) / FADE_FRAMES
+                samples[:count] += weights[:, None] * self.transition
+                self.fade_remaining -= count
+            np.clip(samples, -32768, 32767, out=samples)
+            self.last_output = samples[-1].copy()
+            output = samples.astype('<i2').tobytes()
         return output
 
     def run(self):
@@ -513,3 +621,6 @@ class AudioLooper:
         with self.lock:
             self.commands.clear()
             self.looper.pause_all()
+            self.last_output.fill(0)
+            self.transition.fill(0)
+            self.fade_remaining = 0

@@ -1,3 +1,5 @@
+import { builtinLooper, oscCommands, selectAmp } from './amp-setup.js';
+
 let activeTab = "Amp", connected = false, schema = {}, ampDraft = {}, ampBase = {}, ampStored = {}, schemaProfile = "", editorDirty = false;
 const pages = {};
 let currentPedal = 0;
@@ -136,7 +138,9 @@ function actionEditor(pedal, position = null) {
     bank.addEventListener("change",update);channel.addEventListener("change",update);row.append(bank,channel);
   } else if (kind === "looper") {
     const select = element("select", {"aria-label": "Looper command for " + pedal.name});
-    for (const [command, title] of Object.entries(loopNames)) select.append(option(command, title));
+    for (const [command, title] of Object.entries(loopNames)) {
+      if (builtinLooper(draft) || oscCommands.has(command)) select.append(option(command, title));
+    }
     select.value = action.command;
     select.addEventListener("change", () => setFirstAction(pedal, position, {type: "looper", command: select.value, ...(select.value === "rename_track" ? {name:"My track"} : {})}));
     row.append(select);
@@ -514,9 +518,9 @@ $("#pedal-count").addEventListener("change", () => {
   changed(true); renderDemo();
 });
 $("#amp-profile").addEventListener("change", () => {
-  draft.amp.profile = $("#amp-profile").value;
-  draft.amp.input = null; draft.amp.output = null;
+  const cleared = selectAmp(draft, $("#amp-profile").value, state.library);
   changed(true); renderPorts(); updateLive();
+  toast(cleared ? `${cleared} incompatible action(s) set to No action. Choose actions for this amp and save your setup.` : "Amp changed. Save your setup to use it with the pedals.");
 });
 for (const direction of ["input", "output"]) $("#midi-" + direction).addEventListener("change", (event) => {
   draft.amp[direction] = event.target.value || null; changed();
@@ -619,7 +623,7 @@ function renderLoopTracks() {
     row.classList.toggle("selected-track",track.selected);
     row.querySelector("button").setAttribute("aria-pressed",String(track.selected));
     row.querySelector(".track-name").textContent=track.name;
-    row.querySelector(".track-info").textContent=`${track.mode} · ${track.seconds}s · ${track.muted ? "Muted" : "Volume " + track.volume + "%"}${track.reverse ? " · Reverse" : ""}`;
+    row.querySelector(".track-info").textContent=`${track.finishing ? "Finishing at loop boundary" : track.mode} · ${track.seconds}s · ${track.muted ? "Muted" : "Volume " + track.volume + "%"}${track.reverse ? " · Reverse" : ""}`;
   }
   list.dataset.selected=String(loop.selected_track);
   if(old!==list.dataset.selected && activeTab === "Loops") $("#loop-tracks .selected-track")?.scrollIntoView({block:"nearest"});
