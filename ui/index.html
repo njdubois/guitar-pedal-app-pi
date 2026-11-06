@@ -4,12 +4,18 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Pedal controller</title>
-  <link rel="stylesheet" href="/app.css">
-  <script src="/app.js" type="module"></script>
+  <link rel="stylesheet" href="./app.css">
+  <script src="./runtime-config.js"></script>
+  <script src="./app.js" type="module"></script>
 </head>
 <body>
   <header class="topbar">
-    <a class="brand" href="/" aria-label="Pedal controller home"><span class="brand-icon" aria-hidden="true">⌁</span> Pedal controller</a>
+    <a class="brand" href="./" aria-label="Pedal controller home"><span class="brand-icon" aria-hidden="true">⌁</span><span class="brand-name">Pedal controller</span></a>
+    <form id="controller-form" class="controller-form">
+      <label for="controller-url">Pi server</label>
+      <input id="controller-url" type="text" inputmode="url" autocomplete="url" spellcheck="false" aria-label="Raspberry Pi server URL">
+      <button class="button secondary" type="submit">Connect</button>
+    </form>
     <div class="top-actions">
       <span id="run-status" class="status">Connecting…</span>
       <label class="test-toggle"><input id="test-mode" type="checkbox"> Test mode</label>

@@ -1,4 +1,6 @@
-# Pedal controller interface
+# Pedal controller interface (manual and UI reference)
+
+> The supported deployment is now the headless systemd service plus the separate browser app. See [README.md](README.md) for installation and startup. The material below remains a detailed guide to the controls and the optional interactive launcher.
 
 A local browser interface for your Raspberry Pi 4, latching pedals, and KATANA:GO:2 or Katana MkII. It uses the existing GPIO, tone validator, amp driver, and looper controller. The launcher installs the Python requirements, including NumPy for track mixing. No npm installation is required to run the interface.
 
@@ -20,31 +22,23 @@ Section cards show the latest amp readings: amp model/variation, gain, tone volu
 
 The GO:2 guitar editor includes tone volume, all 23 boosters, all 28 MOD/FX algorithms and their controls, both EQs, noise suppression, routing/cabinet/key, solo EQ, contour, and pedal FX. Open a section card; longer settings scroll inside the card while its navigation and toolbar stay visible. Global EQ, Stage Feel and USB audio settings are amp-wide and are omitted from saved tones. New version 2 tone captures include all active tone controls. Original version 1 captures remain usable and leave newly mapped settings unchanged. Capturing or recalling a library tone does not write onboard preset memory. In Amp → Onboard memories, choose Bank 1–10 and A/B/C. Recall loads that saved tone; Write replaces that slot with the current applied live tone, including its live name. Apply pending edits first and pause pedal control while using this panel. Before writing, the controller saves the target's mapped settings and raw read replies in `.state/memory-backups/`, then verifies stored settings after the write. The backup is a diagnostic/recovery record, not a library-import file or an automatic full-memory restore. In Pedals, choose GO:2 channel and the bank/A/B/C to recall on a stomp. Pedals never write stored slots. See [protocol coverage and verification](docs/go2-protocol-notes.md).
 
-## Start on the Pi
+## Start the Pi and browser apps
 
-Copy the contents of `gpio-controller-ui-update.zip` into your existing `gpio-controller` folder. Replace the code files when asked. It updates the interface code, instructions, and tests. Your `pedals.json`, `tones/` folder, virtual environment, and saved state stay in place.
-
-Stop the terminal controller with **Ctrl+C** before starting the interface. Both programs use the same GPIO inputs.
-
-In a terminal inside your `gpio-controller` folder, run:
+Install the headless Pi service once from this repository:
 
 ```sh
-sh start-ui.sh
+sudo sh install-pi-service.sh
 ```
 
-The launcher creates `.venv` if needed, installs the Python dependencies, and downloads a checksum-verified local Node.js 22 runtime if a suitable Node is unavailable. It creates a missing `pedals.json` with three unassigned GO:2 pedals, plus `tones/user/` and `.state/`. Existing configuration and tones are preserved. Subsequent launches reuse installed dependencies; internet access is needed for the first installation or dependency changes. On Raspberry Pi OS/Debian, missing system packages are installed through apt (sudo may ask for your password). Python 3.11 or newer is required. Run the script as your normal user. A browser opens on the Pi at **http://127.0.0.1:8080**. If it does not open automatically, enter that address in the Pi's browser. Leave the terminal running; **Ctrl+C** stops the app.
+It installs dependencies, preserves your existing `pedals.json`, tones, and saved state, and enables both Pi services at boot. The API becomes `http://guitar-pedal.local:8080`, and the browser frontend becomes `http://guitar-pedal.local:4173`. Pedal actions start as soon as GPIO and required USB audio are ready.
 
-The interface starts with pedal actions stopped and loads your existing `pedals.json`. Its browser address is local to the Pi.
+On Android, connect to the Pi's Wi-Fi/LAN and open this in Chrome:
 
-### Use a browser on your Mac
-
-If you use SSH instead of a desktop on the Pi, open a Mac terminal and connect with port forwarding. Replace the username and hostname with the ones you normally use:
-
-```sh
-ssh -L 8080:127.0.0.1:8080 YOUR_PI_USER@YOUR_PI_HOST
+```text
+http://guitar-pedal.local:4173
 ```
 
-In that SSH session, change to the Pi's `gpio-controller` folder and run `sh start-ui.sh --no-browser`. Then open **http://127.0.0.1:8080** in the Mac's browser. Keep the SSH session open. The interface and tone files still run on the Pi.
+Choose **Add to Home screen** from Chrome's menu if you want a launcher icon. If mDNS does not resolve, use `http://PI_LAN_IP:4173`; the page automatically uses that same address for API port 8080. The static browser app and headless Pi process remain separate services, and no Android terminal, SSH tunnel, or Pi desktop is required.
 
 To troubleshoot pedal identification, open another SSH session on the Pi, change to this folder, and run `python3 diagnose_pedals.py`. Press each switch until it clicks, release it, and press it again. The monitor prints the BCM input and header pin for each change; two changes on one input confirm the UI is receiving that switch. It reads the running UI and does not claim GPIO pins. Stop it with Ctrl+C.
 
@@ -76,7 +70,7 @@ To put this download on one of your physical pedals:
 6. Click **Stop pedals**. Untick **Test mode**, click **Read amp** on the Amp tab, and wait for the successful connection message.
 7. Click **Start pedals**. Each click now recalls the imported settings through USB MIDI.
 
-The file picker opens on the computer running the browser: copy the download to the Pi when using the Pi's browser, or choose the Mac's local download when using its browser through SSH.
+The file picker opens on the computer running the browser. Imported JSON is validated and saved into the tone library on the Pi through the API.
 
 For a recognizable library name, optionally rename the download to `Green Day Rhythm.json` before importing. The original filename works too and appears as **tone plan**. The JSON's `explanation` is shown as a description; only the listed `changes` are sent to the amp. Keep the interface terminal open while using the pedals.
 
@@ -141,18 +135,19 @@ MkII/explicit OSC mode retains its original SooperLooper commands. Built-in trac
 
 ## Try the interface without hardware
 
+In one terminal, start a local demo API:
+
 ```sh
-sh start-ui.sh --demo
+sh start-ui.sh --demo --no-browser --bind 127.0.0.1 --cors-origin http://127.0.0.1:4173
 ```
 
-Demo mode provides **virtual pedal** buttons for identification and testing. It uses temporary copies of the config and tones, forces test mode, and never sends MIDI or looper commands. Demo changes disappear when the app exits.
+In a second terminal run `npm run web`, then set **Pi server** to `http://127.0.0.1:8080`. Demo mode provides **virtual pedal** buttons for identification and testing. It uses temporary copies of the config and tones, forces test mode, and never sends MIDI or looper commands. Demo changes disappear when the API process exits.
 
-Other launch options:
+Manual server options:
 
 ```sh
-sh start-ui.sh --port 8081
-sh start-ui.sh --no-browser
-sh start-ui.sh --config /path/to/pedals.json
+sh start-ui.sh --no-browser --port 8081
+sh start-ui.sh --no-browser --config /path/to/pedals.json
 ```
 
 ## Troubleshooting

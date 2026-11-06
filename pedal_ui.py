@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Local mouse/keyboard interface for the existing Pi pedal controller.
+"""Headless Raspberry Pi pedal controller with an HTTP API and optional UI.
 
 Run: python pedal_ui.py
 Preview without a Pi or amp: python pedal_ui.py --demo
@@ -81,6 +81,9 @@ class GPIOMonitor:
     def start(self):
         if self.thread and self.thread.is_alive():
             return
+        with self.app.lock:
+            self.app.gpio_status = "starting"
+            self.app.gpio_error = ""
         self.stop_event.clear()
         self.thread = threading.Thread(target=self.run, name="pedal-inputs", daemon=True)
         self.thread.start()
@@ -158,6 +161,7 @@ class PedalApp:
         self.gpio_error = ""
         self.amp = {"status": "unchecked", "message": "Connection not checked.", "ports": None}
         self.connection_stop = threading.Event()
+        self.auto_start_thread = None
         self.amp_busy = False
         self.amp_settings = {}
         self.amp_all_settings = {}
@@ -171,6 +175,42 @@ class PedalApp:
         self.connection_thread = threading.Thread(target=self.watch_connection, daemon=True, name="amp-presence")
         self.connection_thread.start()
         self.log("info", "Demo mode: virtual pedals; the amp is unchanged." if demo else "Ready to set up your pedals.")
+
+    def start_automatically(self):
+        """Start pedal handling once GPIO and any required USB audio are ready."""
+        if self.auto_start_thread and self.auto_start_thread.is_alive():
+            return
+        self.auto_start_thread = threading.Thread(
+            target=self._automatic_start, daemon=True, name="automatic-pedal-start"
+        )
+        self.auto_start_thread.start()
+
+    def _automatic_start(self):
+        self.log("info", "Automatic pedal startup is enabled.")
+        last_error = None
+        next_gpio_retry = 0
+        while not self.connection_stop.wait(.5):
+            with self.lock:
+                gpio_status = self.gpio_status
+                revision = self.revision
+            if gpio_status == "error":
+                now = time.monotonic()
+                if now >= next_gpio_retry:
+                    self.monitor.start()
+                    next_gpio_retry = now + 30
+                continue
+            if gpio_status != "ready":
+                continue
+            try:
+                self.start(revision)
+                return
+            except Exception as error:
+                message = str(error)
+                if message != last_error:
+                    self.log("error", f"Automatic start is waiting for hardware: {message}")
+                    last_error = message
+                if self.connection_stop.wait(5):
+                    return
 
     def log(self, kind, message, **extra):
         with self.lock:
@@ -638,6 +678,8 @@ class PedalApp:
     def close(self):
         self.connection_stop.set()
         self.monitor.close()
+        if self.auto_start_thread:
+            self.auto_start_thread.join(timeout=3)
         self.pause()
         with self.lock:
             process = self.midi_process
@@ -663,16 +705,50 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store")
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
+        self.send_cors_headers()
         self.end_headers()
         self.wfile.write(body)
 
-    def check_origin(self):
-        host = self.headers.get("Host", "")
-        if urlparse("//" + host).hostname not in ("localhost", "127.0.0.1", "::1"):
-            raise UIError("Open this app through localhost or 127.0.0.1.", 403)
+    def permitted_origin(self):
         origin = self.headers.get("Origin")
-        if origin and urlparse(origin).netloc != host:
-            raise UIError("This request must come from the pedal interface.", 403)
+        if not origin:
+            return None
+        host = self.headers.get("Host", "")
+        if urlparse(origin).netloc == host:
+            return origin
+        allowed = getattr(self.server, "allowed_origins", set())
+        if "*" in allowed or origin.rstrip("/") in allowed:
+            return origin
+        return None
+
+    def send_cors_headers(self):
+        origin = self.permitted_origin()
+        if not origin:
+            return
+        self.send_header("Access-Control-Allow-Origin", origin)
+        self.send_header("Vary", "Origin")
+        if self.headers.get("Access-Control-Request-Private-Network") == "true":
+            self.send_header("Access-Control-Allow-Private-Network", "true")
+
+    def check_origin(self):
+        origin = self.headers.get("Origin")
+        if origin and not self.permitted_origin():
+            raise UIError("This browser origin is not allowed to control the pedal server.", 403)
+
+    def do_OPTIONS(self):
+        try:
+            self.check_origin()
+            if not urlparse(self.path).path.startswith("/api/"):
+                raise UIError("Page not found.", 404)
+            self.send_response(204)
+            self.send_header("Content-Length", "0")
+            self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+            self.send_header("Access-Control-Allow-Headers", "Content-Type, X-Pedal-Token")
+            self.send_header("Access-Control-Max-Age", "600")
+            self.send_cors_headers()
+            self.end_headers()
+        except Exception as error:
+            self.send(getattr(error, "status", 500), {"error": str(error)})
 
     def do_GET(self):
         try:
@@ -685,13 +761,9 @@ class Handler(BaseHTTPRequestHandler):
             if parsed.path == "/api/tone":
                 filename = parse_qs(parsed.query).get("file", [""])[0]
                 return self.send(200, self.app.tone_file(filename))
-            static = {"/": ("index.html", "text/html; charset=utf-8"),
-                      "/app.js": ("app.js", "text/javascript; charset=utf-8"),
-                      "/amp-setup.js": ("amp-setup.js", "text/javascript; charset=utf-8"),
-                      "/app.css": ("app.css", "text/css; charset=utf-8")}
-            if parsed.path in static:
-                filename, content_type = static[parsed.path]
-                return self.send(200, (ROOT / "ui" / filename).read_bytes(), content_type)
+            if parsed.path == "/":
+                return self.send(200, {"service": "guitar-pedal", "headless": True,
+                                       "state": "/api/state"})
             raise UIError("Page not found.", 404)
         except Exception as error:
             self.send(getattr(error, "status", 500), {"error": str(error)})
@@ -761,9 +833,12 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", default=str(ROOT / "pedals.json"))
     parser.add_argument("--port", type=int, default=8080)
+    parser.add_argument("--bind", default="127.0.0.1", help="Address to listen on (use 0.0.0.0 for Wi-Fi/LAN access)")
+    parser.add_argument("--cors-origin", action="append", default=[], help="Browser origin allowed to use the API; repeat or use * on a trusted LAN")
     parser.add_argument("--node", default="node")
     parser.add_argument("--demo", action="store_true")
     parser.add_argument("--no-browser", action="store_true")
+    parser.add_argument("--auto-start", action="store_true", help="Start pedal handling when the required hardware is ready")
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s", datefmt="%H:%M:%S")
     temporary = None
@@ -776,13 +851,17 @@ def main():
         config_path = demo_root / "pedals.json"
     app = PedalApp(config_path, args.demo, args.node)
     try:
-        server = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
+        server = ThreadingHTTPServer((args.bind, args.port), Handler)
         server.daemon_threads = True
         server.app = app
+        server.allowed_origins = {origin.rstrip("/") for origin in args.cors_origin}
         if not args.demo:
             app.monitor.start()
-        url = f"http://127.0.0.1:{server.server_port}"
-        print(f"\nPedal interface: {url}\nKeep this terminal open. Ctrl+C to stop.\n", flush=True)
+        if args.auto_start:
+            app.start_automatically()
+        display_host = "127.0.0.1" if args.bind in ("0.0.0.0", "::") else args.bind
+        url = f"http://{display_host}:{server.server_port}"
+        print(f"\nPedal server: {url}\nListening on {args.bind}. Ctrl+C to stop.\n", flush=True)
         if not args.no_browser:
             threading.Timer(.4, lambda: webbrowser.open(url)).start()
         try:

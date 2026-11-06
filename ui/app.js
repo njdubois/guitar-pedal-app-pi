@@ -1,4 +1,5 @@
 import { builtinLooper, oscCommands, selectAmp } from './amp-setup.js';
+import { controllerEndpoint, defaultControllerUrl, normalizeControllerUrl } from './server-url.js';
 
 let activeTab = "Amp", connected = false, schema = {}, ampDraft = {}, ampBase = {}, ampStored = {}, schemaProfile = "", editorDirty = false;
 const pages = {};
@@ -11,6 +12,10 @@ let state = null, draft = null, revision = "", dirty = false, busy = false;
 let pausePending = null, learningToken = null, importTarget = null, toastTimer;
 let loopReceived = 0, lastLooperAction = null;
 let polling = false, lastActivity = 0, portsKey = "", remoteConflict = false;
+const controllerStorageKey = `pedal-controller-url:${location.host}`;
+let controllerUrl;
+try { controllerUrl = normalizeControllerUrl(localStorage.getItem(controllerStorageKey) || defaultControllerUrl()); }
+catch { controllerUrl = defaultControllerUrl(); }
 const loopNames = {
   record: "Record / replace selected track", record_new_track: "Record a new track", add_track: "Add empty track",
   finish_recording: "Finish recording", next_track: "Next track", scroll_tracks: "Scroll tracks (next, wraps to first)", previous_track: "Previous track",
@@ -57,7 +62,7 @@ async function api(path, body) {
     headers: {"Content-Type": "application/json", "X-Pedal-Token": state?.token || ""},
     body: JSON.stringify(body),
   };
-  const response = await fetch(path, options);
+  const response = await fetch(controllerEndpoint(controllerUrl, path), options);
   const result = await response.json();
   if (!response.ok) throw new Error(result.error || "The controller could not complete that action.");
   return result;
@@ -498,7 +503,7 @@ async function poll() {
     if (lastLooperAction !== null && action > lastLooperAction) selectTab("Loops");
     lastLooperAction = action;
   } catch (error) {
-    $("#connection-error").textContent = "Controller disconnected. Keep the Python interface running on the Pi. Reconnecting…";
+    $("#connection-error").textContent = `Cannot reach the headless Pi server at ${controllerUrl}. Check its power and Wi-Fi; reconnecting…`;
     $("#connection-error").hidden = false;
     $("#start").disabled = true;
     showConnection();
@@ -506,6 +511,22 @@ async function poll() {
 }
 
 for (let count = 1; count <= 10; count++) $("#pedal-count").append(option(String(count), String(count)));
+$("#controller-url").value = controllerUrl;
+$("#controller-form").addEventListener("submit", (event) => {
+  event.preventDefault();
+  run(async () => {
+    const nextUrl = normalizeControllerUrl($("#controller-url").value);
+    controllerUrl = nextUrl;
+    try { localStorage.setItem(controllerStorageKey, nextUrl); } catch {}
+    $("#controller-url").value = controllerUrl;
+    state = null; draft = null; revision = ""; dirty = false; remoteConflict = false;
+    schema = {}; schemaProfile = ""; ampBase = {}; ampDraft = {}; ampStored = {}; editorDirty = false;
+    showConnection();
+    $("#connection-error").textContent = `Connecting to ${controllerUrl}…`;
+    $("#connection-error").hidden = false;
+    await poll();
+  });
+});
 $("#pedal-count").addEventListener("change", () => {
   const count = Number($("#pedal-count").value);
   while (draft.switches.length < count) {
